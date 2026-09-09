@@ -1,0 +1,28 @@
+[package]
+name = "manka-shreds-sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Subscriber client for the manka-shreds Solana shred stream"
+repository = "https://github.com/Manka-Group/manka-shreds-sdk"
+keywords = ["solana", "shred", "manka-shreds", "streaming"]
+categories = ["network-programming"]
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[dependencies]
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.9"
+thiserror = "2"
+tokio = { version = "1", features = ["net", "io-util", "time", "rt"] }
+webpki-roots = "1"
+zstd = "0.13"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
