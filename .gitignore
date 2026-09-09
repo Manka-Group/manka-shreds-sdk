@@ -1,0 +1,8 @@
+# Rust
+/rust/target/
+
+# TypeScript
+node_modules/
+/typescript/dist/
+/typescript/dist-test/
+/typescript/package-lock.json
