@@ -103,6 +103,57 @@ node your-script.js
 
 ---
 
+---
+
+## Python
+
+Requires Python 3.14 or newer, where zstd is in the standard library. A TCP subscriber needs no
+other package.
+
+**1. Install:**
+
+```fish
+pip install "manka-shreds-sdk @ git+https://github.com/Manka-Group/manka-shreds-sdk#subdirectory=python"
+```
+
+QUIC needs a native implementation, so add it if you want the default transport:
+
+```fish
+pip install "manka-shreds-sdk[quic] @ git+https://github.com/Manka-Group/manka-shreds-sdk#subdirectory=python"
+```
+
+**2. Connect and read:**
+
+```python
+import asyncio, os
+from manka_shreds_sdk import Client, Stream
+
+async def main():
+    client = await Client.connect(
+        host="NODE_HOST",
+        port=9000,
+        secret=os.environ["MANKA_SHREDS_SECRET"],
+        streams=Stream.TRANSACTIONS,
+    )
+    async for event in client:
+        if event.type == "transaction":
+            tx = event.transaction
+            print(tx.slot, tx.signature.hex() if tx.signature else None)
+
+asyncio.run(main())
+```
+
+**3. Run it:**
+
+```fish
+set -x MANKA_SHREDS_SECRET your-secret-here
+python your_script.py
+```
+
+Transactions should start appearing within a second or two. If nothing arrives, the table of
+refusals at the end of this document says what each one means.
+
+
 ## It connected. Now what?
 
 **You are getting everything.** That is every transaction on the cluster, votes included — votes are

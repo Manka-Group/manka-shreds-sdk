@@ -6,3 +6,11 @@ node_modules/
 /typescript/dist/
 /typescript/dist-test/
 /typescript/package-lock.json
+
+# Python
+__pycache__/
+*.py[cod]
+/python/.venv/
+/python/dist/
+/python/*.egg-info/
+/python/.pytest_cache/

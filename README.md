@@ -1,7 +1,7 @@
 # manka-shreds SDKs
 
 Client libraries for the [manka-shreds](https://github.com/Manka-Group/manka-shreds) Solana shred stream, in
-Rust and TypeScript.
+Rust, TypeScript and Python.
 
 manka-shreds ingests raw shreds directly from the cluster, deduplicates them across sources, recovers what
 the network lost from parity, decodes them to transactions, and streams the result to authenticated
@@ -12,15 +12,16 @@ assembled, and well before RPC.
 |---|---|---|---|
 | Rust | [`rust/`](rust) | tokio | `tokio`, `quinn`, `rustls`, `zstd`, `thiserror`, `sha2` |
 | TypeScript | [`typescript/`](typescript) | Node 22.15+ | `@matrixai/quic` (native) |
+| Python | [`python/`](python) | asyncio, Python 3.14+ | none for TCP; `aioquic` for QUIC |
 
 **New here? Start with [SETUP.md](SETUP.md)** — clone to a transaction on screen, in five minutes,
-in either language.
+in any of the three languages.
 
-This file covers what the two SDKs share: the protocol itself. Language detail lives in
-**[Rust](rust/README.md)** · **[TypeScript](typescript/README.md)**.
+This file covers what the three SDKs share: the protocol itself. Language detail lives in
+**[Rust](rust/README.md)** · **[TypeScript](typescript/README.md)** · **[Python](python/README.md)**.
 
-**Not yet on crates.io or npm.** The Rust crate installs as a git dependency and the TypeScript
-package is built from this repository — see the install section of whichever usage document you
+**Not yet on crates.io, npm or PyPI.** The Rust crate and the Python package install from git, and
+the TypeScript package is built from this repository — see the install section of whichever usage document you
 need. Nothing else about your code changes when they are published to the registries.
 
 **You need two things: the node's address, and your secret.** The address is public; the secret is
