@@ -473,8 +473,10 @@ def read_filter_ack(buf: bytes) -> FilterAck:
 class NamedFilter:
     """One filter, with the name the subscriber chose for it."""
 
-    #: The filter itself.
-    spec: dict
+    #: The filter itself, as anything JSON-encodable the node's schema accepts — a mapping for a
+    #: clause such as ``{"accounts": {"include": [...]}}``, or a bare string for a unit variant
+    #: such as ``"all"``.
+    spec: object
     #: What you call it. Comes back in a refusal so you know which one was at fault.
     name: str | None = None
 
