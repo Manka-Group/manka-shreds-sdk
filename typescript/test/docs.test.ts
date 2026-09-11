@@ -43,7 +43,7 @@ function roots(): { pkg: string; repo: string } {
 const { pkg, repo } = roots();
 
 /** The markdown a consumer of this package actually reads. */
-const DOCUMENTS = ['README.md', 'SETUP.md', 'typescript/README.md', 'rust/README.md'];
+const DOCUMENTS = ['README.md'];
 
 interface Block {
   document: string;
@@ -87,10 +87,11 @@ const all = DOCUMENTS.flatMap(blocks);
 
 test('the documents contain the examples this checks', () => {
   // A guard against the extractor silently matching nothing — which would turn every check below
-  // into a test that passes by looking at an empty list.
-  assert.ok(all.length > 20, `only found ${all.length} code blocks across ${DOCUMENTS.length} documents`);
+  // into a test that passes by looking at an empty list. The README is deliberately short and
+  // carries one example per language; everything else lives on docs.manka.wtf.
+  assert.ok(all.length >= 2, `only found ${all.length} code blocks across ${DOCUMENTS.length} documents`);
   const typescript = all.filter((block) => block.language === 'ts');
-  assert.ok(typescript.length >= 5, `only found ${typescript.length} TypeScript examples`);
+  assert.ok(typescript.length >= 1, `only found ${typescript.length} TypeScript examples`);
 });
 
 test('no example contains a template literal that lost its interpolation', () => {

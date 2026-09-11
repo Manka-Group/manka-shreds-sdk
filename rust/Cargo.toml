@@ -6,6 +6,9 @@ rust-version = "1.85"
 license = "MIT"
 description = "Subscriber client for the manka-shreds Solana shred stream"
 repository = "https://github.com/Manka-Group/manka-shreds-sdk"
+homepage = "https://docs.manka.wtf"
+documentation = "https://docs.manka.wtf"
+readme = "README.md"
 keywords = ["solana", "shred", "manka-shreds", "streaming"]
 categories = ["network-programming"]
 
