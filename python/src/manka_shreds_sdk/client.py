@@ -581,6 +581,16 @@ class Client:
         await self.close()
 
     @property
+    def server_fingerprint(self) -> str | None:
+        """SHA-256 of the certificate the session completed against, or ``None`` over TCP.
+
+        Nothing verified it; the node proved itself with your key. Read it if you want to pin
+        it on a later connection with :class:`~manka_shreds_sdk.Fingerprint`.
+        """
+        getter = getattr(self._wire, "server_fingerprint", None)
+        return getter() if getter is not None else None
+
+    @property
     def dictionary(self) -> bytes | None:
         """The compression dictionary this connection settled on, if any."""
         return self._dictionary

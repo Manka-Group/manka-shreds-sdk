@@ -164,14 +164,26 @@ async def connect_tcp(host: str, port: int, timeout: float = 10.0) -> Wire:
 class _QuicWire:
     """One bidirectional QUIC stream, carrying exactly the framing TCP does."""
 
-    __slots__ = ("_binding", "_client", "_reader", "_stream_id", "_writer")
+    __slots__ = ("_binding", "_client", "_fingerprint", "_reader", "_stream_id", "_writer")
 
-    def __init__(self, client, reader, writer, stream_id: int, binding: bytes) -> None:
+    def __init__(
+        self, client, reader, writer, stream_id: int, binding: bytes, fingerprint: str
+    ) -> None:
         self._client = client
         self._reader = reader
         self._writer = writer
         self._stream_id = stream_id
         self._binding = binding
+        self._fingerprint = fingerprint
+
+    def server_fingerprint(self) -> str:
+        """SHA-256 of the certificate this session completed against, lowercase hex.
+
+        Nothing verified it — the node authenticates itself with your key. This is here so a
+        deployment that wants to pin one can read the value it should pin, rather than being
+        told it out of band.
+        """
+        return self._fingerprint
 
     async def read(self, limit: int = 65536) -> bytes:
         return await self._reader.read(limit)
@@ -241,7 +253,9 @@ async def connect_quic(
 
     reader, writer = await client.create_stream()
     binding = hashlib.sha256(der).digest() if der else NO_BINDING
-    wire = _QuicWire(client, reader, writer, writer.get_extra_info("stream_id", 0), binding)
+    wire = _QuicWire(
+        client, reader, writer, writer.get_extra_info("stream_id", 0), binding, fingerprint_of(der)
+    )
 
     async def closer() -> None:
         await context.__aexit__(None, None, None)
