@@ -9,7 +9,7 @@ description = "Subscriber client for the manka-shreds Solana shred stream"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"
-keywords = ["solana", "shreds", "manka-shreds", "streaming"]
+keywords = ["solana", "shred", "manka-shreds", "streaming"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -25,7 +25,10 @@ dependencies = []
 quic = ["aioquic>=1.2"]
 
 [project.urls]
+Homepage = "https://docs.manka.wtf"
+Documentation = "https://docs.manka.wtf"
 Repository = "https://github.com/Manka-Group/manka-shreds-sdk"
+Issues = "https://github.com/Manka-Group/manka-shreds-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/manka_shreds_sdk"]
