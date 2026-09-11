@@ -1,6 +1,6 @@
 # manka-shreds SDK
 
-Client libraries for the manka-shreds Solana shred stream, in Rust and TypeScript. A transaction
+Client libraries for the manka-shreds Solana shred stream, in Rust, TypeScript and Python. A transaction
 reaches you when the shreds carrying it arrive, before any block is assembled and well before RPC.
 
 ## Documentation
@@ -23,6 +23,12 @@ TypeScript, built from this repository until the package is published:
 ```bash
 git clone https://github.com/Manka-Group/manka-shreds-sdk
 npm install ./manka-shreds-sdk/typescript
+```
+
+Python, from the repository until the package is published:
+
+```bash
+pip install "manka-shreds-sdk @ git+https://github.com/Manka-Group/manka-shreds-sdk#subdirectory=python"
 ```
 
 ## Getting started
@@ -65,8 +71,25 @@ for await (const event of client) {
 }
 ```
 
-Both connect over QUIC, both require compression, and both fetch the compression dictionary from
-the node while connecting. You are subscribed to everything by default, votes included — narrowing
+```python
+import asyncio, os
+from manka_shreds_sdk import Client
+
+async def main():
+    client = await Client.connect(
+        host=os.environ["MANKA_SHREDS_HOST"],
+        port=int(os.environ["MANKA_SHREDS_PORT"]),
+        secret=os.environ["MANKA_SHREDS_SECRET"],
+    )
+    async for event in client:
+        if event.type == "transaction":
+            print(event.transaction.slot, event.transaction.signature)
+
+asyncio.run(main())
+```
+
+All three connect over QUIC, all three require compression, and all three fetch the compression
+dictionary from the node while connecting. You are subscribed to everything by default, votes included — narrowing
 that is the first thing to read about in the documentation.
 
 ## Requirements
@@ -74,6 +97,9 @@ that is the first thing to read about in the documentation.
 Rust 1.85 or newer, edition 2024, on tokio.
 
 Node 22.15 or newer, where zstd is built in.
+
+Python 3.14 or newer, where zstd is in the standard library. A TCP subscriber needs no other
+package; QUIC adds `aioquic` via the `quic` extra.
 
 ## License
 
