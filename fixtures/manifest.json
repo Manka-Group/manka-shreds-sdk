@@ -1,6 +1,7 @@
 {
   "handshake": {"key_material_utf8": "fixture-key", "certificate_der_utf8": "fixture-certificate", "client_nonce_byte": 17, "server_nonce_byte": 34, "key_ref_hex": "5484dceddfa3ca9ee9572386bbd9887783e175546a31b0b4aaa16c3c882adeab", "binding_hex": "bf848fb76f156548d37ae748f9634f19fdb3193a235654b7570fbbcc86ef3c5c", "server_proof_hex": "ff8263b8a0e665c185a7dcd427b45af79cd4079e1111865500d42dbebf22d9ff", "client_proof_hex": "d70c802c4c54ca6aa0c3eec9757ba5fc0110951fe4cfd76f95c2a26c3da607ef", "tcp_binding_server_proof_hex": "d463690519932ed057209c31404ef6e14c8af777fc73cab9d9e7facc13b16e7e"},
   "hello": {"protocol_version": 1, "streams": 5, "codecs": 4, "key_material_utf8": "fixture-key", "client_nonce_hex": "00", "capabilities": 1, "dictionary_id": 305419896},
+  "hello_unpacked": {"protocol_version": 1, "streams": 5, "codecs": 4, "key_material_utf8": "fixture-key", "client_nonce_hex": "00", "capabilities": 3, "dictionary_id": 305419896},
   "hello_filtered": {"protocol_version": 1, "streams": 5, "codecs": 4, "key_material_utf8": "fixture-key", "client_nonce_hex": "00", "capabilities": 1, "dictionary_id": 305419896, "filter": "{\"filters\":[{\"name\":\"mine\",\"spec\":{\"is_vote\":{\"value\":false}}}]}"},
   "hello_ack": {"protocol_version": 1, "granted": 1, "session_id": "72623859790382856", "codec": 2, "keepalive_ms": 15000, "dictionary_id": 305419896},
   "error": {"code": 5, "detail": "this server requires a compressed stream; offer zstd or lz4 in the handshake"},
@@ -15,6 +16,9 @@
   "tx_full": {"account_count": 6, "instruction_count": 1, "signature_count": 1, "lookup_count": 2, "is_vote": true, "recovered": true, "has_raw_tx": true, "raw_tx_len": 413, "instruction_data_len": 40, "lookup_writable": [1], "lookup_readonly": [2], "lookup0_key_byte": 160, "lookup1_key_byte": 161, "message_version": 0},
   "tx_legacy": {"message_version": 255, "account_count": 2, "instruction_count": 1, "signature_count": 1, "lookup_count": 0, "leader": null, "verification": "unknown-leader", "instruction_data": [9, 8, 7], "program_id_index": 1},
   "tx_malformed": {"signature_count": 0, "account_count": 2, "instruction_count": 1, "lookup_count": 0, "message_version": 0, "program_id_index": 9, "note": "unsigned, and names a program index past its own account list; both SDKs must decode it without throwing"},
+  "tx_unpacked": {"account_count": 10, "static_account_count": 6, "loaded_writable": 2, "loaded_readonly": 2, "lookup_count": 2, "lookups_partial": true, "lookups_tentative": true, "late": false, "loaded_key_bytes": [192, 193, 194], "unresolved_index": 9},
+  "tx_late": {"account_count": 10, "static_account_count": 6, "loaded_writable": 2, "loaded_readonly": 2, "lookups_partial": false, "lookups_tentative": true, "late": true, "loaded_key_bytes": [192, 193, 194, 195]},
+  "lookups_complete": {"kind": 21, "slot": "250000001", "rx_ts_ns": "1700000000000", "entry_index": 12, "tx_index": 3, "signature_byte": 17, "verification": "verified", "still_partial": false, "tentative": true, "positions": [9], "key_bytes": [195]},
   "frame_plain": {"kind": 1, "seq": "7", "compressed": false},
   "frame_zstd": {"kind": 1, "seq": "8", "compressed": true},
   "frame_matched": {"kind": 1, "seq": "11", "compressed": false, "matched": 9, "matched_indices": [0, 3]},

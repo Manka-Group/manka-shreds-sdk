@@ -20,7 +20,8 @@
  *                                99  u8   required_signatures
  *                               100  u8   readonly_signed
  *                               101  u8   readonly_unsigned
- *                               102  u16  reserved
+ *                               102  u8   loaded_writable   (lookups unpacked, else 0)
+ *                               103  u8   loaded_readonly   (lookups unpacked, else 0)
  * 104     signatures         signature_count * 64
  *         account_keys       account_count * 32
  *         recent_blockhash   32
@@ -57,7 +58,22 @@ export const TxFlag = {
   RECOVERED: 1 << 3,
   /** The leader was known and named in the header. */
   HAS_LEADER: 1 << 4,
+  /** Some loaded accounts are the placeholder ({@link isUnresolved}): table not held yet. */
+  LOOKUPS_PARTIAL: 1 << 7,
+  /** Some loaded accounts come from a lookup table extension not yet confirmed. */
+  LOOKUPS_TENTATIVE: 1 << 8,
+  /** Sent after the transaction was first published, once a missing lookup table arrived. */
+  LATE: 1 << 9,
 } as const;
+
+/**
+ * Whether `key` is the placeholder at a loaded account's position while the table it comes from is
+ * not yet known to the server: every byte `0xff`, which no real key is. A function rather than an
+ * exported buffer, which any caller could write to.
+ */
+export function isUnresolved(key: Buffer): boolean {
+  return key.length === 32 && key.every((byte) => byte === 0xff);
+}
 
 const REASON_SHIFT = 5;
 const REASON_MASK = 0b11;
@@ -248,6 +264,45 @@ export class Transaction {
   /** Number of account keys carried in the message. */
   get accountCount(): number {
     return this.bytes.readUInt16LE(92);
+  }
+
+  /**
+   * Accounts loaded from lookup tables and appended to the account keys, writable first. Both zero
+   * unless the connection asked for lookups unpacked.
+   */
+  get loadedCounts(): { writable: number; readonly: number } {
+    return { writable: this.bytes.readUInt8(102), readonly: this.bytes.readUInt8(103) };
+  }
+
+  /**
+   * The message's own account keys, without any loaded from lookup tables. Account roles derive
+   * from this: the last `readonlyUnsigned` of these are read-only, not of `accountCount`.
+   */
+  get staticAccountCount(): number {
+    const { writable, readonly } = this.loadedCounts;
+    return Math.max(0, this.accountCount - writable - readonly);
+  }
+
+  /**
+   * Whether some loaded accounts are still the placeholder ({@link isUnresolved}) because the
+   * server did not yet hold the table they come from. A `lookups-complete` event for this
+   * transaction follows when it does.
+   */
+  get lookupsPartial(): boolean {
+    return this.has(TxFlag.LOOKUPS_PARTIAL);
+  }
+
+  /** Whether some loaded accounts come from a lookup table extension not yet confirmed. */
+  get lookupsTentative(): boolean {
+    return this.has(TxFlag.LOOKUPS_TENTATIVE);
+  }
+
+  /**
+   * Whether this arrived after the transaction was first sent, because this connection's filter
+   * matched it only once a missing lookup table arrived.
+   */
+  get isLate(): boolean {
+    return this.has(TxFlag.LATE);
   }
 
   /** Number of instructions. */

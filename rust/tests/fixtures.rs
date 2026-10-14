@@ -562,3 +562,68 @@ fn the_dictionary_limit_matches_the_servers() {
         "this client and the server disagree about how large a dictionary may be"
     );
 }
+
+#[test]
+fn a_greeting_asking_for_lookups_unpacked_encodes_to_exactly_the_bytes_the_server_expects() {
+    let mut actual = Vec::new();
+    Hello {
+        streams: StreamMask(StreamMask::TRANSACTIONS | StreamMask::SLOT_EVENTS),
+        codecs: CODEC_BIT_ZSTD,
+        key_ref: KeyRef::of(b"fixture-key"),
+        client_nonce: [0u8; 32],
+        capabilities: Capabilities(Capabilities::ACCEPTS_DICTIONARY | Capabilities::UNPACKS_LOOKUPS),
+        filter: None,
+        dictionary_id: 0x1234_5678,
+    }
+    .write(&mut actual);
+    assert_eq!(actual, load("hello_unpacked.bin"));
+}
+
+/// Loaded accounts follow the message's own, writable first; a table the server did not hold yet
+/// leaves the placeholder and the partial flag.
+#[test]
+fn a_transaction_with_lookups_unpacked_decodes_its_loaded_accounts() {
+    let bytes = load("tx_unpacked.bin");
+    let tx = Transaction::read(&bytes).expect("decodes");
+    assert_eq!(tx.account_count(), 10);
+    assert_eq!(tx.static_account_count(), 6);
+    assert_eq!(tx.loaded_counts(), (2, 2));
+    assert_eq!(tx.lookup_count(), 2);
+    assert!(tx.lookups_partial());
+    assert!(tx.lookups_tentative());
+    assert!(!tx.is_late());
+    let keys: Vec<&[u8; 32]> = tx.account_keys().collect();
+    assert_eq!((keys[6][0], keys[7][0], keys[8][0]), (0xc0, 0xc1, 0xc2));
+    assert_eq!(*keys[9], manka_shreds_sdk::UNRESOLVED);
+
+    let late = load("tx_late.bin");
+    let late = Transaction::read(&late).expect("decodes");
+    assert!(late.is_late());
+    assert!(!late.lookups_partial());
+    assert_eq!(late.account_key(9).map(|key| key[0]), Some(0xc3));
+
+    // Without lookups unpacked nothing is loaded, and the static count is the whole count.
+    let simple = load("tx_simple.bin");
+    let simple = Transaction::read(&simple).expect("decodes");
+    assert_eq!(simple.loaded_counts(), (0, 0));
+    assert_eq!(simple.static_account_count(), simple.account_count());
+}
+
+#[test]
+fn a_lookups_completion_decodes_and_fills_the_placeholder() {
+    let bytes = load("lookups_complete.bin");
+    let complete = manka_shreds_sdk::LookupsComplete::read(&bytes).expect("decodes");
+    assert_eq!(complete.slot, 250_000_001);
+    assert_eq!(complete.rx_ts_ns, 1_700_000_000_000);
+    assert_eq!((complete.entry_index, complete.tx_index), (12, 3));
+    assert_eq!(complete.signature[0], 0x11);
+    assert_eq!(complete.verification, Verification::Verified);
+    assert!(!complete.still_partial);
+    assert!(complete.tentative);
+    let completed: Vec<(usize, u8)> = complete.completed().map(|(at, key)| (at, key[0])).collect();
+    assert_eq!(completed, vec![(9, 0xc3)]);
+    assert_eq!(FrameKind::from_byte(21), FrameKind::LookupsComplete);
+    for len in [0, 95, bytes.len() - 1] {
+        assert!(manka_shreds_sdk::LookupsComplete::read(&bytes[..len]).is_err(), "{len} bytes read");
+    }
+}

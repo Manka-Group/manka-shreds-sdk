@@ -43,6 +43,8 @@ export enum FrameKind {
   Prove = 17,
   /** The compression dictionary the server wants this connection to use. */
   Dictionary = 18,
+  /** Loaded accounts of a transaction sent with lookups unpacked, resolved since it was sent. */
+  LookupsComplete = 21,
 }
 
 /** Streams a subscriber may ask for. A key grants a subset; the server grants the intersection. */
@@ -102,6 +104,11 @@ export const Capability = {
    * was never given one.
    */
   ACCEPTS_DICTIONARY: 1 << 0,
+  /**
+   * This client wants transactions with the accounts their address lookup tables load appended to
+   * their account keys. Set by the `unpackLookups` option.
+   */
+  UNPACKS_LOOKUPS: 1 << 1,
 } as const;
 
 /**

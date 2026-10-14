@@ -47,8 +47,14 @@ import {
   verifyServer,
 } from '../src/handshake.js';
 import { DictionaryCache, scratchDir } from '../src/dictcache.js';
-import { readDuplicate, readEntry, readSlotEnd, readSlotStart } from '../src/events.js';
-import { MESSAGE_VERSION_LEGACY, Transaction } from '../src/transaction.js';
+import {
+  readDuplicate,
+  readEntry,
+  readLookupsComplete,
+  readSlotEnd,
+  readSlotStart,
+} from '../src/events.js';
+import { MESSAGE_VERSION_LEGACY, Transaction, isUnresolved } from '../src/transaction.js';
 
 const dir = fileURLToPath(new URL('../../../fixtures/', import.meta.url));
 const load = (name: string): Buffer => readFileSync(dir + name);
@@ -680,5 +686,78 @@ test('a dictionary stored after a load is the one offered next', () => {
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a greeting asking for lookups unpacked encodes to exactly the bytes the server expects', () => {
+  const actual = writeHello({
+    streams: Stream.TRANSACTIONS | Stream.SLOT_EVENTS,
+    codecs: 1 << 2,
+    keyRef: keyRef(Buffer.from(manifest.hello_unpacked.key_material_utf8, 'utf8')),
+    clientNonce: Buffer.alloc(32),
+    capabilities: Capability.ACCEPTS_DICTIONARY | Capability.UNPACKS_LOOKUPS,
+    dictionaryId: manifest.hello_unpacked.dictionary_id,
+  });
+  assert.deepEqual(actual, load('hello_unpacked.bin'));
+  assert.equal(manifest.hello_unpacked.capabilities, Capability.ACCEPTS_DICTIONARY | Capability.UNPACKS_LOOKUPS);
+});
+
+// Loaded accounts follow the message's own, writable first; a table the server did not hold yet
+// leaves the placeholder and the partial flag.
+test('a transaction with lookups unpacked decodes its loaded accounts', () => {
+  const tx = Transaction.read(load('tx_unpacked.bin'));
+  const want = manifest.tx_unpacked;
+  assert.equal(tx.accountCount, want.account_count);
+  assert.equal(tx.staticAccountCount, want.static_account_count);
+  assert.deepEqual(tx.loadedCounts, { writable: want.loaded_writable, readonly: want.loaded_readonly });
+  assert.equal(tx.lookupsPartial, want.lookups_partial);
+  assert.equal(tx.lookupsTentative, want.lookups_tentative);
+  assert.equal(tx.isLate, want.late);
+  const keys = tx.accountKeys();
+  assert.deepEqual(
+    keys.slice(want.static_account_count, want.static_account_count + 3).map((key) => key[0]),
+    want.loaded_key_bytes,
+  );
+  const unresolved = keys[want.unresolved_index];
+  assert.ok(unresolved !== undefined && isUnresolved(unresolved));
+  assert.ok(!isUnresolved(keys[0] ?? Buffer.alloc(0)));
+
+  const late = Transaction.read(load('tx_late.bin'));
+  assert.equal(late.isLate, manifest.tx_late.late);
+  assert.equal(late.lookupsPartial, manifest.tx_late.lookups_partial);
+  assert.deepEqual(
+    late.accountKeys().slice(6).map((key) => key[0]),
+    manifest.tx_late.loaded_key_bytes,
+  );
+
+  // Without lookups unpacked nothing is loaded, and the static count is the whole count.
+  const simple = Transaction.read(load('tx_simple.bin'));
+  assert.deepEqual(simple.loadedCounts, { writable: 0, readonly: 0 });
+  assert.equal(simple.staticAccountCount, simple.accountCount);
+});
+
+test('a lookups completion decodes and names the placeholder it fills', () => {
+  const bytes = load('lookups_complete.bin');
+  const want = manifest.lookups_complete;
+  const complete = readLookupsComplete(bytes);
+  assert.equal(complete.slot, BigInt(want.slot));
+  assert.equal(complete.rxTsNs, BigInt(want.rx_ts_ns));
+  assert.equal(complete.entryIndex, want.entry_index);
+  assert.equal(complete.txIndex, want.tx_index);
+  assert.equal(complete.signature[0], want.signature_byte);
+  assert.equal(complete.verification, Verification.Verified);
+  assert.equal(complete.stillPartial, want.still_partial);
+  assert.equal(complete.tentative, want.tentative);
+  assert.deepEqual(
+    complete.completed.map((entry) => entry.position),
+    want.positions,
+  );
+  assert.deepEqual(
+    complete.completed.map((entry) => entry.key[0]),
+    want.key_bytes,
+  );
+  assert.equal(FrameKind.LookupsComplete, want.kind);
+  for (const len of [0, 95, bytes.length - 1]) {
+    assert.throws(() => readLookupsComplete(bytes.subarray(0, len)), `${len} bytes read`);
   }
 });

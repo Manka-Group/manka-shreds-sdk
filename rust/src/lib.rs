@@ -83,11 +83,11 @@ pub async fn connect(
     Client::connect(addr, Config::new(secret)).await
 }
 pub use error::{Error, Result};
-pub use events::{Duplicate, Entry, RawShred, SlotEnd, SlotStart};
+pub use events::{Duplicate, Entry, LookupsComplete, RawShred, SlotEnd, SlotStart};
 pub use dictcache::DictionaryCache;
 pub use protocol::{
     Capabilities, Codec, Dictionary, ErrorCode, FrameHeader, FrameKind, MAX_DICTIONARY_BYTES,
     StreamMask, Verification, dictionary_id,
 };
-pub use transaction::{AddressLookup, Instruction, Transaction};
+pub use transaction::{AddressLookup, Instruction, Transaction, UNRESOLVED};
 pub use transport::{ServerVerification, Transport, fingerprint_of};

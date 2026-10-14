@@ -21,7 +21,8 @@
 //!                                99  u8   required_signatures
 //!                               100  u8   readonly_signed
 //!                               101  u8   readonly_unsigned
-//!                               102  u16  reserved
+//!                               102  u8   loaded_writable   (lookups unpacked, else 0)
+//!                               103  u8   loaded_readonly   (lookups unpacked, else 0)
 //! 104     signatures         signature_count * 64
 //!         account_keys       account_count * 32
 //!         recent_blockhash   32
@@ -57,6 +58,13 @@ const RECOVERED: u16 = 1 << 3;
 const HAS_LEADER: u16 = 1 << 4;
 const REASON_SHIFT: u16 = 5;
 const REASON_MASK: u16 = 0b11;
+const LOOKUPS_PARTIAL: u16 = 1 << 7;
+const LOOKUPS_TENTATIVE: u16 = 1 << 8;
+const LATE: u16 = 1 << 9;
+
+/// The key at a loaded account's position while the table it comes from is not yet known to the
+/// server: every byte `0xff`, which no real key is. See [`Transaction::lookups_partial`].
+pub const UNRESOLVED: [u8; 32] = [0xff; 32];
 
 /// Rounds up to a multiple of 8.
 const fn align8(len: usize) -> usize {
@@ -307,10 +315,49 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    /// Number of account keys carried in the message.
+    /// Number of account keys carried: the message's own, plus those loaded from lookup tables when
+    /// the connection asked for lookups unpacked.
     #[inline]
     pub fn account_count(&self) -> usize {
         self.u16_at(92) as usize
+    }
+
+    /// Accounts loaded from lookup tables and appended to [`Self::account_keys`]: `(writable,
+    /// readonly)`, writable first. Both zero unless the connection asked for lookups unpacked.
+    #[inline]
+    pub fn loaded_counts(&self) -> (u8, u8) {
+        (self.bytes[102], self.bytes[103])
+    }
+
+    /// The message's own account keys, without any loaded from lookup tables. Account roles derive
+    /// from this: the last [`Self::readonly_unsigned`] of these are read-only, not of
+    /// [`Self::account_count`].
+    #[inline]
+    pub fn static_account_count(&self) -> usize {
+        let (writable, readonly) = self.loaded_counts();
+        self.account_count()
+            .saturating_sub(usize::from(writable) + usize::from(readonly))
+    }
+
+    /// Whether some loaded accounts are still [`UNRESOLVED`] because the server did not yet hold the
+    /// table they come from. A [`crate::Event::LookupsComplete`] for this transaction follows when it
+    /// arrives.
+    #[inline]
+    pub fn lookups_partial(&self) -> bool {
+        self.has(LOOKUPS_PARTIAL)
+    }
+
+    /// Whether some loaded accounts come from a lookup table extension not yet confirmed.
+    #[inline]
+    pub fn lookups_tentative(&self) -> bool {
+        self.has(LOOKUPS_TENTATIVE)
+    }
+
+    /// Whether this arrived after the transaction was first sent, because the connection's filter
+    /// matched it only once a missing lookup table arrived.
+    #[inline]
+    pub fn is_late(&self) -> bool {
+        self.has(LATE)
     }
 
     /// Number of instructions.

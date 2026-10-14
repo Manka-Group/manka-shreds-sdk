@@ -60,6 +60,8 @@ pub enum FrameKind {
     Prove = 17,
     /// The compression dictionary the server wants this connection to use.
     Dictionary = 18,
+    /// Loaded accounts of a transaction sent with lookups unpacked, resolved since it was sent.
+    LookupsComplete = 21,
 }
 
 impl FrameKind {
@@ -88,6 +90,7 @@ impl FrameKind {
             16 => Self::Challenge,
             17 => Self::Prove,
             18 => Self::Dictionary,
+            21 => Self::LookupsComplete,
             _ => Self::Unknown,
         }
     }
@@ -109,6 +112,10 @@ impl Capabilities {
     /// ratio from its first message, rather than paying roughly three times the bandwidth until
     /// somebody notices it was never given one.
     pub const ACCEPTS_DICTIONARY: u8 = 1 << 0;
+
+    /// This client wants transactions with the accounts their address lookup tables load appended
+    /// to their account keys. See [`crate::Config::unpack_lookups`].
+    pub const UNPACKS_LOOKUPS: u8 = 1 << 1;
 
     /// Whether every bit in `bits` is set.
     ///

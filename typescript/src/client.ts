@@ -61,10 +61,12 @@ import {
 import {
   readDuplicate,
   readRawShred,
+  readLookupsComplete,
   readEntry,
   readSlotEnd,
   readSlotStart,
   type Duplicate,
+  type LookupsComplete,
   type RawShred,
   type Entry,
   type SlotEnd,
@@ -181,6 +183,18 @@ export interface ClientOptions {
    * `connect` rather than falling back to an unfiltered stream.
    */
   filters?: NamedFilter[];
+  /**
+   * Ask for every transaction with the accounts its address lookup tables load appended to its
+   * account keys, writable first, in the order the runtime loads them, and matched by filters like
+   * any other account. `loadedCounts` says how many were appended; `staticAccountCount` is the
+   * message's own, which account roles derive from.
+   *
+   * A table the server does not hold yet leaves the placeholder (`isUnresolved`) at its accounts
+   * and the transaction `lookupsPartial`; a `lookups-complete` event follows with the keys once it
+   * arrives, and a transaction your filter matches only on those keys arrives then, `isLate`. A
+   * node that does not unpack ignores the request and sends transactions as written.
+   */
+  unpackLookups?: boolean;
 }
 
 /** Something the server sent. */
@@ -208,6 +222,11 @@ export type MankaShredsEvent =
    * leader-signed — see {@link RawShred}.
    */
   | { type: 'raw-shred'; seq: bigint; shred: RawShred }
+  /**
+   * Accounts of a transaction received `lookupsPartial`, resolved since. Only on a connection that
+   * set `unpackLookups`.
+   */
+  | { type: 'lookups-complete'; seq: bigint; complete: LookupsComplete }
   | { type: 'lag'; seq: bigint; lag: Lag }
   | { type: 'filter-ack'; seq: bigint; ack: FilterAck }
   | { type: 'ping'; seq: bigint }
@@ -351,7 +370,9 @@ export class MankaShredsClient implements AsyncIterable<MankaShredsEvent> {
         // Asking for the dictionary is what makes the ratio automatic. A node only sends one to a
         // client that said it would take it, so a client that cannot is never handed a megabyte it
         // would discard.
-        capabilities: Capability.ACCEPTS_DICTIONARY,
+        capabilities: options.unpackLookups
+          ? Capability.ACCEPTS_DICTIONARY | Capability.UNPACKS_LOOKUPS
+          : Capability.ACCEPTS_DICTIONARY,
         dictionaryId: held ? dictionaryId(held) : 0,
         // Encoded through the same function `setFilters` uses, so a filter means the same thing
         // whichever way it was sent.
@@ -746,6 +767,8 @@ export class MankaShredsClient implements AsyncIterable<MankaShredsEvent> {
         return { type: 'duplicate', seq, duplicate: readDuplicate(body) };
       case FrameKind.RawShred:
         return { type: 'raw-shred', seq, shred: readRawShred(body) };
+      case FrameKind.LookupsComplete:
+        return { type: 'lookups-complete', seq, complete: readLookupsComplete(body) };
       case FrameKind.Lag: {
         const lag = readLag(body);
         this.gapCount += lag.dropped;
