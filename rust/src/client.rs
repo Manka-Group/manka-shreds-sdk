@@ -312,13 +312,18 @@ pub enum Event<'a> {
 pub struct Client {
     stream: crate::transport::Wire,
     ack: HelloAck,
-    /// Prepared once: the expensive part of using a dictionary is digesting it, not referencing it.
-    dictionary: Option<zstd::dict::DecoderDictionary<'static>>,
+    /// One decompression context for the connection, holding the dictionary when one is in use:
+    /// creating a context and referencing a dictionary per frame cost an allocation and an init
+    /// on every frame.
+    decompressor: zstd::bulk::Decompressor<'static>,
     dictionary_active: bool,
     dictionary_was_sent: bool,
     max_message_bytes: usize,
-    /// Bytes read from the socket that do not yet form a whole frame.
+    /// Bytes read from the socket; `pending[pending_at..]` is not consumed yet.
     pending: Vec<u8>,
+    /// Where the unconsumed bytes start: a consumed frame only moves this, and the leftover is
+    /// moved to the front only when more bytes must be read, not once per frame.
+    pending_at: usize,
     /// The current frame's payload, decompressed.
     frame: Vec<u8>,
     expected_seq: u64,
@@ -404,7 +409,7 @@ impl Client {
 
         let mut pending = Vec::new();
         let (header, payload_range) =
-            tokio::time::timeout(config.connect_timeout, read_frame(&mut stream, &mut pending, crate::protocol::MAX_HANDSHAKE_BYTES))
+            tokio::time::timeout(config.connect_timeout, read_frame(&mut stream, &mut pending, &mut 0, crate::protocol::MAX_HANDSHAKE_BYTES))
                 .await
                 .map_err(|_| Error::Handshake("timed out waiting for the reply".to_string()))??;
 
@@ -454,7 +459,7 @@ impl Client {
         stream.write_all(&frame).await?;
 
         let (header, payload_range) =
-            tokio::time::timeout(config.connect_timeout, read_frame(&mut stream, &mut pending, crate::protocol::MAX_HANDSHAKE_BYTES))
+            tokio::time::timeout(config.connect_timeout, read_frame(&mut stream, &mut pending, &mut 0, crate::protocol::MAX_HANDSHAKE_BYTES))
                 .await
                 .map_err(|_| Error::Handshake("timed out waiting for the reply".to_string()))??;
         let payload = &pending[payload_range.clone()];
@@ -503,6 +508,7 @@ impl Client {
                 read_frame(
                     &mut stream,
                     &mut pending,
+                    &mut 0,
                     Dictionary::HEADER_LEN + crate::protocol::MAX_DICTIONARY_BYTES,
                 ),
             )
@@ -556,18 +562,21 @@ impl Client {
         }
 
         let dictionary_active = bytes.is_some();
-        let dictionary = bytes
-            .as_ref()
-            .map(|bytes| zstd::dict::DecoderDictionary::copy(bytes));
+        let decompressor = match bytes.as_ref() {
+            Some(bytes) => zstd::bulk::Decompressor::with_dictionary(bytes),
+            None => zstd::bulk::Decompressor::new(),
+        }
+        .map_err(|err| Error::Decompress(err.to_string()))?;
 
         Ok(Self {
             stream,
             ack,
-            dictionary,
+            decompressor,
             dictionary_active,
             dictionary_was_sent,
             max_message_bytes: config.max_message_bytes,
             pending,
+            pending_at: 0,
             frame: Vec::new(),
             expected_seq: 0,
             gaps: 0,
@@ -677,35 +686,32 @@ impl Client {
     /// needed from it copied out — before the next call.
     pub async fn next_event(&mut self) -> Result<Event<'_>> {
         let (header, range) =
-            read_frame(&mut self.stream, &mut self.pending, self.max_message_bytes).await?;
+            read_frame(&mut self.stream, &mut self.pending, &mut self.pending_at, self.max_message_bytes).await?;
         self.wire_bytes += (FRAME_HEADER_LEN + header.len) as u64;
+        // The frame is consumed whatever happens below.
+        self.pending_at = range.end;
 
         self.frame.clear();
         if header.compressed {
             match header.codec {
                 Codec::Zstd => {
                     let input = &self.pending[range.clone()];
-                    let decoded = match self.dictionary.as_ref() {
-                        // `with_prepared_dictionary` references an already-digested dictionary, so
-                        // this is not re-loading it per frame.
-                        Some(prepared) => {
-                            zstd::bulk::Decompressor::with_prepared_dictionary(prepared)
-                                .and_then(|mut d| d.decompress(input, self.max_message_bytes))
-                        }
-                        None => zstd::bulk::decompress(input, self.max_message_bytes),
-                    }
-                    .map_err(|err| Error::Decompress(err.to_string()))?;
-                    self.frame = decoded;
+                    // Decompressed into the reused frame buffer, sized from the frame's own content
+                    // size when its header carries one (else the connection's limit, as before).
+                    let size = match zstd::zstd_safe::get_frame_content_size(input) {
+                        Ok(Some(n)) => usize::try_from(n).unwrap_or(usize::MAX).min(self.max_message_bytes),
+                        _ => self.max_message_bytes,
+                    };
+                    self.frame.reserve(size);
+                    self.decompressor
+                        .decompress_to_buffer(input, &mut self.frame)
+                        .map_err(|err| Error::Decompress(err.to_string()))?;
                 }
-                other => {
-                    self.pending.drain(..range.end);
-                    return Err(Error::CompressionRequired(other));
-                }
+                other => return Err(Error::CompressionRequired(other)),
             }
         } else {
             self.frame.extend_from_slice(&self.pending[range.clone()]);
         }
-        self.pending.drain(..range.end);
         self.decoded_bytes += self.frame.len() as u64;
 
         // A sequence gap means the server dropped frames for this connection. It is reported by the
@@ -804,11 +810,12 @@ impl std::fmt::Debug for Client {
 async fn read_frame(
     stream: &mut crate::transport::Wire,
     pending: &mut Vec<u8>,
+    at: &mut usize,
     limit: usize,
 ) -> Result<(FrameHeader, std::ops::Range<usize>)> {
     loop {
-        if pending.len() >= FRAME_HEADER_LEN {
-            let header = read_frame_header(pending)?;
+        if pending.len() - *at >= FRAME_HEADER_LEN {
+            let header = read_frame_header(&pending[*at..])?;
             if header.len > limit {
                 return Err(Error::Handshake(format!(
                     "the server sent a {:?} frame of {} bytes, and this connection accepts at most \
@@ -816,11 +823,20 @@ async fn read_frame(
                     header.kind, header.len
                 )));
             }
-            let end = FRAME_HEADER_LEN + header.len;
+            let end = *at + FRAME_HEADER_LEN + header.len;
             if pending.len() >= end {
-                return Ok((header, FRAME_HEADER_LEN..end));
+                return Ok((header, *at + FRAME_HEADER_LEN..end));
             }
-            pending.reserve(end - pending.len());
+        }
+        // More bytes are needed: move the unconsumed tail to the front first (once per read, not
+        // once per frame), then make room for the rest of the frame.
+        if *at > 0 {
+            pending.drain(..*at);
+            *at = 0;
+        }
+        if pending.len() >= FRAME_HEADER_LEN {
+            let header = read_frame_header(pending)?;
+            pending.reserve((FRAME_HEADER_LEN + header.len).saturating_sub(pending.len()));
         }
         let read = stream.read_buf(pending).await?;
         if read == 0 {

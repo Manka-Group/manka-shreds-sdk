@@ -127,19 +127,14 @@ impl Wire {
             Self::Tcp(stream) => Ok(stream.read_buf(buf).await?),
             Self::Quic { recv, .. } => {
                 // Read into the spare capacity the caller already reserved, so a frame larger than
-                // one datagram does not reallocate per chunk.
-                let at = buf.len();
-                if buf.capacity() - at < 16 * 1024 {
+                // one datagram does not reallocate per chunk. The capacity is filled uninitialised
+                // (`read_buf`), not zeroed first: that was 64 KB of memset per read.
+                if buf.capacity() - buf.len() < 16 * 1024 {
                     buf.reserve(64 * 1024);
                 }
-                buf.resize(buf.capacity(), 0);
-                let read = recv
-                    .read(&mut buf[at..])
+                recv.read_buf(buf)
                     .await
-                    .map_err(|error| Error::Handshake(format!("quic read: {error}")))?;
-                let read = read.unwrap_or(0);
-                buf.truncate(at + read);
-                Ok(read)
+                    .map_err(|error| Error::Handshake(format!("quic read: {error}")))
             }
         }
     }
