@@ -1313,3 +1313,50 @@ mod handshake_ceiling {
         );
     }
 }
+
+/// Throughput of the client on a raw-shred stream arriving as one large burst, the way a node
+/// delivers frames that piled up behind a leader gap: 200,000 zstd frames of a 1,200-byte shred
+/// each, all written before the client reads. `cargo test --release -- --ignored --nocapture
+/// raw_shred_burst_throughput`.
+#[tokio::test]
+#[ignore]
+async fn raw_shred_burst_throughput() {
+    const FRAMES: u64 = 200_000;
+    let addr = stub(|mut socket, _| async move {
+        socket.write_all(&hello_ack(Codec::Zstd, StreamMask::RAW_SHREDS, 0)).await.expect("write");
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut stream = Vec::new();
+        for seq in 0..FRAMES {
+            let mut body = vec![0u8; 32 + 1_200];
+            body[0..8].copy_from_slice(&(400_000_000 + seq / 1_000).to_le_bytes());
+            body[8..12].copy_from_slice(&((seq % 1_000) as u32).to_le_bytes());
+            for b in &mut body[32..] {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                *b = state as u8;
+            }
+            let packed = zstd::bulk::compress(&body, 1).expect("compress");
+            let start = stream.len();
+            write_frame(&mut stream, FrameKind::RawShred, seq, &packed);
+            stream[start + 5] = 0b100 | Codec::Zstd as u8;
+        }
+        socket.write_all(&stream).await.expect("write");
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    })
+    .await;
+    let mut client = Client::connect(addr, config()).await.expect("connects");
+    let started = std::time::Instant::now();
+    let mut shreds = 0u64;
+    while shreds < FRAMES {
+        if let Event::RawShred(_) = client.next_event().await.expect("event") {
+            shreds += 1;
+        }
+    }
+    let elapsed = started.elapsed();
+    println!(
+        "{shreds} raw-shred frames in {:.1} ms: {:.2} us per frame",
+        elapsed.as_secs_f64() * 1e3,
+        elapsed.as_secs_f64() * 1e6 / shreds as f64
+    );
+}
