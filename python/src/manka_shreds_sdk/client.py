@@ -227,6 +227,10 @@ class Client:
         async for event in client:
             if event.type == "transaction":
                 print(event.transaction.slot, event.transaction.signature.hex())
+
+    Compression is not optional. This client offers only zstd and refuses a stream the node would
+    send uncompressed; every Manka node refuses to send one anyway. The compression level is the
+    node's choice and changes nothing here: a decoder reads any level, and the dictionary is the same.
     """
 
     __slots__ = (

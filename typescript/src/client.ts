@@ -6,10 +6,13 @@
  * # Compression is not optional
  *
  * This client offers only zstd. A manka-shreds node streams several hundred megabits of transaction data
- * per second uncompressed, and a dictionary-compressed stream is roughly a third of that. Letting a
- * subscriber quietly negotiate its way to an uncompressed stream costs the operator bandwidth they
- * did not agree to, so a node can be configured to refuse it — and this client refuses it too,
- * rather than connecting and silently costing more than it should.
+ * per second uncompressed, and a dictionary-compressed stream is roughly a third of that. Letting
+ * a subscriber quietly negotiate its way to an uncompressed stream costs the operator bandwidth
+ * they did not agree to, so a node can be configured to refuse it, and every Manka node is. This
+ * client refuses it too, rather than connecting and silently costing more than it should.
+ *
+ * The compression level is the node's choice and changes nothing here: a decoder reads any level,
+ * and the dictionary is the same at every one.
  *
  * The only requirement this places on a consumer is Node 22.15 or newer, where zstd is built in.
  */
