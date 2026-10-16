@@ -6,7 +6,7 @@ use tokio::net::ToSocketAddrs;
 
 use crate::{
     error::{Error, Result},
-    events::{Duplicate, Entry, RawShred, SlotEnd, SlotStart},
+    events::{Duplicate, Entry, LookupsComplete, RawShred, SlotEnd, SlotStart},
     protocol::{
         CODEC_BIT_ZSTD, Codec, ErrorMessage, FRAME_HEADER_LEN, FilterAck, FilterMask, FrameHeader,
         FrameKind,
@@ -93,6 +93,9 @@ pub struct Config {
     ///
     /// Set through [`Config::filters`] or [`Config::filter`] rather than directly.
     pub filter: Option<String>,
+    /// Ask for transactions with the accounts their address lookup tables load appended to their
+    /// account keys. See [`Config::unpack_lookups`].
+    pub unpack_lookups: bool,
 }
 
 impl Config {
@@ -114,6 +117,7 @@ impl Config {
             connect_timeout: std::time::Duration::from_secs(10),
             max_message_bytes: 16 << 20,
             filter: None,
+            unpack_lookups: false,
         }
     }
 
@@ -176,6 +180,22 @@ impl Config {
     #[must_use]
     pub fn streams(mut self, streams: StreamMask) -> Self {
         self.streams = streams;
+        self
+    }
+
+    /// Asks for every transaction with the accounts its address lookup tables load appended to its
+    /// account keys, writable first, in the order the runtime loads them, and matched by filters like
+    /// any other account. [`Transaction::loaded_counts`] says how many were appended;
+    /// [`Transaction::static_account_count`] is the message's own, which account roles derive from.
+    ///
+    /// A table the server does not hold yet leaves [`crate::UNRESOLVED`] at its accounts and the
+    /// transaction [`Transaction::lookups_partial`]; an [`Event::LookupsComplete`] follows with the
+    /// keys once it arrives, and a transaction your filter matches only on those keys arrives then,
+    /// [`Transaction::is_late`]. A node that does not unpack ignores the request and sends
+    /// transactions as written.
+    #[must_use]
+    pub fn unpack_lookups(mut self) -> Self {
+        self.unpack_lookups = true;
         self
     }
 
@@ -255,6 +275,9 @@ pub enum Event<'a> {
     /// Delivered before the node verified or decoded anything, so nothing on it is claimed to be
     /// leader-signed — see [`RawShred`].
     RawShred(RawShred<'a>),
+    /// Accounts of a transaction received [`Transaction::lookups_partial`], resolved since. Only on a
+    /// connection that asked for [`Config::unpack_lookups`].
+    LookupsComplete(LookupsComplete<'a>),
     /// Frames this connection missed.
     Lag(Lag),
     /// The server's verdict on a submitted filter.
@@ -281,8 +304,11 @@ pub enum Event<'a> {
 /// This client offers only zstd. A manka-shreds node streams several hundred megabits of transaction data
 /// per second uncompressed, and a dictionary-compressed stream is roughly a third of that. Letting
 /// a subscriber quietly negotiate its way to an uncompressed stream costs the operator bandwidth
-/// they did not agree to, so a node can be configured to refuse it — and this client refuses it
-/// too, rather than connecting and silently costing more than it should.
+/// they did not agree to, so a node can be configured to refuse it, and every Manka node is. This
+/// client refuses it too, rather than connecting and silently costing more than it should.
+///
+/// The compression level is the node's choice and changes nothing here: a decoder reads any level,
+/// and the dictionary is the same at every one.
 pub struct Client {
     stream: crate::transport::Wire,
     ack: HelloAck,
@@ -363,7 +389,11 @@ impl Client {
             // Asking for the dictionary is what makes the ratio automatic. A node only sends one
             // to a client that said it would take it, so a client that cannot is never handed a
             // megabyte it would discard.
-            capabilities: Capabilities(Capabilities::ACCEPTS_DICTIONARY),
+            capabilities: Capabilities(if config.unpack_lookups {
+                Capabilities::ACCEPTS_DICTIONARY | Capabilities::UNPACKS_LOOKUPS
+            } else {
+                Capabilities::ACCEPTS_DICTIONARY
+            }),
             dictionary_id: offered_id,
             filter: config.filter.clone(),
         }
@@ -715,6 +745,7 @@ impl Client {
             FrameKind::SlotEnd => Event::SlotEnd(SlotEnd::read(body)?),
             FrameKind::Duplicate => Event::Duplicate(Duplicate::read(body)?),
             FrameKind::RawShred => Event::RawShred(RawShred::read(body)?),
+            FrameKind::LookupsComplete => Event::LookupsComplete(LookupsComplete::read(body)?),
             FrameKind::FilterAck => Event::FilterAck(FilterAck::read(body)?),
             FrameKind::Pong => Event::Pong,
             // The dictionary is settled during the handshake and does not change while a

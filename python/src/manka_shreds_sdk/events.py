@@ -23,15 +23,18 @@ __all__ = [
     "DUPLICATE_LEN",
     "ENTRY_LEN",
     "RAW_SHRED_HEADER_LEN",
+    "LOOKUPS_COMPLETE_HEADER_LEN",
     "SLOT_END_LEN",
     "SLOT_START_LEN",
     "Duplicate",
     "Entry",
+    "LookupsComplete",
     "RawShred",
     "SlotEnd",
     "SlotStart",
     "read_duplicate",
     "read_entry",
+    "read_lookups_complete",
     "read_raw_shred",
     "read_slot_end",
     "read_slot_start",
@@ -260,4 +263,61 @@ def read_raw_shred(data: bytes) -> RawShred:
         # newer node, and refusing the frame would break you over a field you do not use.
         is_data=data[26] != 1,
         bytes=bytes(data[RAW_SHRED_HEADER_LEN:]),
+    )
+
+
+#: Bytes before a lookups completion's positions.
+LOOKUPS_COMPLETE_HEADER_LEN = 96
+
+
+@dataclass(frozen=True, slots=True)
+class LookupsComplete:
+    """Loaded accounts of a transaction sent with lookups unpacked that were the placeholder then
+    and are known now, because the table they come from reached the server.
+
+    Sent only to a connection that received the transaction with ``lookups_partial`` set. Each
+    position indexes that transaction's account keys: write the key over the placeholder there.
+    Join it to the transaction by signature, or by ``(slot, entry_index, tx_index)``.
+    """
+
+    slot: int
+    #: When the server received the last shred the transaction needed, on its monotonic clock.
+    rx_ts_ns: int
+    entry_index: int
+    tx_index: int
+    #: The transaction's first signature.
+    signature: bytes
+    verification: Verification
+    #: Placeholders remain, to be completed by a later event.
+    still_partial: bool
+    #: Some of these keys come from a lookup table extension not yet confirmed.
+    tentative: bool
+    #: Each completed account: its index in the transaction's account keys, and its key.
+    completed: tuple[tuple[int, bytes], ...]
+
+
+def read_lookups_complete(data: bytes) -> LookupsComplete:
+    """Decode a lookups completion."""
+    _require(data, LOOKUPS_COMPLETE_HEADER_LEN, "lookups complete")
+    count = struct.unpack_from("<H", data, 90)[0]
+    keys_at = LOOKUPS_COMPLETE_HEADER_LEN + (count + 7) // 8 * 8
+    _require(data, keys_at + count * 32, "lookups complete")
+    slot, rx_ts, entry_index, tx_index = struct.unpack_from("<QQII", data, 0)
+    flags = data[89]
+    return LookupsComplete(
+        slot=slot,
+        rx_ts_ns=rx_ts,
+        entry_index=entry_index,
+        tx_index=tx_index,
+        signature=bytes(data[24:88]),
+        verification=_decode_verification(data[88]),
+        still_partial=bool(flags & 1),
+        tentative=bool(flags & 2),
+        completed=tuple(
+            (
+                data[LOOKUPS_COMPLETE_HEADER_LEN + n],
+                bytes(data[keys_at + n * 32 : keys_at + n * 32 + 32]),
+            )
+            for n in range(count)
+        ),
     )

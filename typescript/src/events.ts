@@ -226,3 +226,57 @@ export function readRawShred(bytes: Buffer): RawShred {
     bytes: bytes.subarray(RAW_SHRED_HEADER_LEN),
   };
 }
+
+/** Bytes before a lookups completion's positions. */
+export const LOOKUPS_COMPLETE_HEADER_LEN = 96;
+
+/**
+ * Loaded accounts of a transaction sent with lookups unpacked that were the placeholder then and
+ * are known now, because the table they come from reached the server.
+ *
+ * Sent only to a connection that received the transaction with `lookupsPartial` set. Each
+ * `position` indexes that transaction's account keys: write `key` over the placeholder there. Join
+ * it to the transaction by signature, or by `(slot, entryIndex, txIndex)`.
+ */
+export interface LookupsComplete {
+  slot: bigint;
+  /** When the server received the last shred the transaction needed, on its monotonic clock. */
+  rxTsNs: bigint;
+  entryIndex: number;
+  txIndex: number;
+  /** The transaction's first signature. */
+  signature: Buffer;
+  verification: Verification;
+  /** Placeholders remain, to be completed by a later event. */
+  stillPartial: boolean;
+  /** Some of these keys come from a lookup table extension not yet confirmed. */
+  tentative: boolean;
+  completed: { position: number; key: Buffer }[];
+}
+
+/** Reads a lookups completion. */
+export function readLookupsComplete(bytes: Buffer): LookupsComplete {
+  require_(bytes, LOOKUPS_COMPLETE_HEADER_LEN, 'lookups complete');
+  const count = bytes.readUInt16LE(90);
+  const keysAt = LOOKUPS_COMPLETE_HEADER_LEN + Math.ceil(count / 8) * 8;
+  require_(bytes, keysAt + count * 32, 'lookups complete');
+  const flags = bytes.readUInt8(89);
+  const completed = [];
+  for (let n = 0; n < count; n += 1) {
+    completed.push({
+      position: bytes.readUInt8(LOOKUPS_COMPLETE_HEADER_LEN + n),
+      key: bytes.subarray(keysAt + n * 32, keysAt + n * 32 + 32),
+    });
+  }
+  return {
+    slot: bytes.readBigUInt64LE(0),
+    rxTsNs: bytes.readBigUInt64LE(8),
+    entryIndex: bytes.readUInt32LE(16),
+    txIndex: bytes.readUInt32LE(20),
+    signature: bytes.subarray(24, 88),
+    verification: decodeVerification(bytes.readUInt8(88)),
+    stillPartial: (flags & 1) !== 0,
+    tentative: (flags & 2) !== 0,
+    completed,
+  };
+}

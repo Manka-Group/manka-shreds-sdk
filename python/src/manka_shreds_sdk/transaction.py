@@ -18,7 +18,8 @@ A fixed 104-byte header followed by sections in a fixed order, each 8-byte align
                                    99  u8   required_signatures
                                   100  u8   readonly_signed
                                   101  u8   readonly_unsigned
-                                  102  u16  reserved
+                                  102  u8   loaded_writable   (lookups unpacked, else 0)
+                                  103  u8   loaded_readonly   (lookups unpacked, else 0)
     104     signatures         signature_count * 64
             account_keys       account_count * 32
             recent_blockhash   32
@@ -50,6 +51,7 @@ __all__ = [
     "Instruction",
     "Transaction",
     "TxFlag",
+    "UNRESOLVED",
 ]
 
 #: Bytes in the fixed header.
@@ -73,6 +75,17 @@ class TxFlag(IntFlag):
     RECOVERED = 1 << 3
     #: The leader was known and named in the header.
     HAS_LEADER = 1 << 4
+    #: Some loaded accounts are still :data:`UNRESOLVED`: the server did not hold their table yet.
+    LOOKUPS_PARTIAL = 1 << 7
+    #: Some loaded accounts come from a lookup table extension not yet confirmed.
+    LOOKUPS_TENTATIVE = 1 << 8
+    #: Sent after the transaction was first published, once a missing lookup table arrived.
+    LATE = 1 << 9
+
+
+#: The key at a loaded account's position while the table it comes from is not yet known to the
+#: server: every byte ``0xff``, which no real key is.
+UNRESOLVED = b"\xff" * 32
 
 
 _REASON_SHIFT = 5
@@ -276,8 +289,40 @@ class Transaction:
 
     @property
     def account_count(self) -> int:
-        """Number of account keys carried in the message."""
+        """Number of account keys carried: the message's own, plus those loaded from lookup tables
+        when the connection asked for lookups unpacked."""
         return self._u16(92)
+
+    @property
+    def loaded_counts(self) -> tuple[int, int]:
+        """Accounts loaded from lookup tables and appended to the account keys, as ``(writable,
+        readonly)``, writable first. Both zero unless the connection asked for lookups unpacked."""
+        return self.bytes[102], self.bytes[103]
+
+    @property
+    def static_account_count(self) -> int:
+        """The message's own account keys, without any loaded from lookup tables. Account roles
+        derive from this: the last ``readonly_unsigned`` of these are read-only, not of
+        ``account_count``."""
+        writable, readonly = self.loaded_counts
+        return max(0, self.account_count - writable - readonly)
+
+    @property
+    def lookups_partial(self) -> bool:
+        """Whether some loaded accounts are still :data:`UNRESOLVED` because the server did not yet
+        hold the table they come from. A :class:`LookupsCompleteEvent` follows when it does."""
+        return self._has(TxFlag.LOOKUPS_PARTIAL)
+
+    @property
+    def lookups_tentative(self) -> bool:
+        """Whether some loaded accounts come from a lookup table extension not yet confirmed."""
+        return self._has(TxFlag.LOOKUPS_TENTATIVE)
+
+    @property
+    def is_late(self) -> bool:
+        """Whether this arrived after the transaction was first sent, because this connection's
+        filter matched it only once a missing lookup table arrived."""
+        return self._has(TxFlag.LATE)
 
     @property
     def instruction_count(self) -> int:

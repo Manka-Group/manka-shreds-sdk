@@ -55,7 +55,8 @@ from manka_shreds_sdk.protocol import (
     write_hello,
 )
 from manka_shreds_sdk.protocol import Dictionary as Dict_
-from manka_shreds_sdk.transaction import MESSAGE_VERSION_LEGACY, Transaction
+from manka_shreds_sdk.events import read_lookups_complete
+from manka_shreds_sdk.transaction import MESSAGE_VERSION_LEGACY, UNRESOLVED, Transaction
 
 FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "fixtures"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text())
@@ -462,3 +463,64 @@ def test_a_malformed_transaction_decodes_without_raising() -> None:
 def test_a_truncated_transaction_is_refused() -> None:
     with pytest.raises(ProtocolError, match="transaction header needs"):
         Transaction.read(b"\x00" * 16)
+
+
+def test_a_greeting_asking_for_lookups_unpacked_encodes_to_exactly_the_bytes_the_server_expects() -> None:
+    hello = MANIFEST["hello_unpacked"]
+    actual = write_hello(
+        Hello(
+            streams=Stream.TRANSACTIONS | Stream.SLOT_EVENTS,
+            codecs=1 << 2,
+            key_ref=key_ref(hello["key_material_utf8"].encode()),
+            client_nonce=bytes(32),
+            capabilities=Capability.ACCEPTS_DICTIONARY | Capability.UNPACKS_LOOKUPS,
+            dictionary_id=hello["dictionary_id"],
+        )
+    )
+    assert actual == load("hello_unpacked.bin")
+    assert hello["capabilities"] == Capability.ACCEPTS_DICTIONARY | Capability.UNPACKS_LOOKUPS
+
+
+def test_a_transaction_with_lookups_unpacked_decodes_its_loaded_accounts() -> None:
+    """Loaded accounts follow the message's own, writable first; a table the server did not hold
+    yet leaves the placeholder and the partial flag."""
+    tx = Transaction.read(load("tx_unpacked.bin"))
+    want = MANIFEST["tx_unpacked"]
+    assert tx.account_count == want["account_count"]
+    assert tx.static_account_count == want["static_account_count"]
+    assert tx.loaded_counts == (want["loaded_writable"], want["loaded_readonly"])
+    assert tx.lookups_partial == want["lookups_partial"]
+    assert tx.lookups_tentative == want["lookups_tentative"]
+    assert tx.is_late == want["late"]
+    keys = tx.account_keys()
+    statics = want["static_account_count"]
+    assert [key[0] for key in keys[statics : statics + 3]] == want["loaded_key_bytes"]
+    assert keys[want["unresolved_index"]] == UNRESOLVED
+
+    late = Transaction.read(load("tx_late.bin"))
+    assert late.is_late == MANIFEST["tx_late"]["late"]
+    assert late.lookups_partial == MANIFEST["tx_late"]["lookups_partial"]
+    assert [key[0] for key in late.account_keys()[6:]] == MANIFEST["tx_late"]["loaded_key_bytes"]
+
+    simple = Transaction.read(load("tx_simple.bin"))
+    assert simple.loaded_counts == (0, 0)
+    assert simple.static_account_count == simple.account_count
+
+
+def test_a_lookups_completion_decodes_and_names_the_placeholder_it_fills() -> None:
+    data = load("lookups_complete.bin")
+    want = MANIFEST["lookups_complete"]
+    complete = read_lookups_complete(data)
+    assert complete.slot == int(want["slot"])
+    assert complete.rx_ts_ns == int(want["rx_ts_ns"])
+    assert (complete.entry_index, complete.tx_index) == (want["entry_index"], want["tx_index"])
+    assert complete.signature[0] == want["signature_byte"]
+    assert complete.verification == Verification.VERIFIED
+    assert complete.still_partial == want["still_partial"]
+    assert complete.tentative == want["tentative"]
+    assert [position for position, _ in complete.completed] == want["positions"]
+    assert [key[0] for _, key in complete.completed] == want["key_bytes"]
+    assert FrameKind.LOOKUPS_COMPLETE == want["kind"]
+    for length in (0, 95, len(data) - 1):
+        with pytest.raises(ProtocolError):
+            read_lookups_complete(data[:length])

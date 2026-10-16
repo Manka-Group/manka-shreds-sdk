@@ -92,6 +92,8 @@ class FrameKind(IntEnum):
     PROVE = 17
     #: The compression dictionary the server wants this connection to use.
     DICTIONARY = 18
+    #: Loaded accounts of a transaction sent with lookups unpacked, resolved since it was sent.
+    LOOKUPS_COMPLETE = 21
 
 
 class Stream(IntEnum):
@@ -155,6 +157,10 @@ class Capability(IntEnum):
     #: ratio from its first message, rather than paying roughly three times the bandwidth until
     #: somebody notices it was never given one.
     ACCEPTS_DICTIONARY = 1 << 0
+
+    #: This client wants transactions with the accounts their address lookup tables load appended
+    #: to their account keys. Set by ``unpack_lookups=True``.
+    UNPACKS_LOOKUPS = 1 << 1
 
 
 #: Largest dictionary this client will accept from a server.

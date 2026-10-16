@@ -270,3 +270,68 @@ impl<'a> RawShred<'a> {
         })
     }
 }
+
+/// Loaded accounts of a transaction sent with lookups unpacked that were [`crate::transaction::UNRESOLVED`]
+/// then and are known now, because the table they come from reached the server.
+///
+/// Sent only to a connection that received the transaction flagged
+/// [`crate::Transaction::lookups_partial`]. Each position indexes that transaction's
+/// [`crate::Transaction::account_keys`]: write the key over the placeholder there. Join it to the
+/// transaction by signature, or by `(slot, entry_index, tx_index)`.
+#[derive(Clone, Copy, Debug)]
+pub struct LookupsComplete<'a> {
+    /// Slot the transaction was produced in.
+    pub slot: u64,
+    /// When the server received the last shred the transaction needed, on its monotonic clock.
+    pub rx_ts_ns: u64,
+    /// Entry within the slot.
+    pub entry_index: u32,
+    /// Transaction within its entry.
+    pub tx_index: u32,
+    /// The transaction's first signature.
+    pub signature: &'a [u8; 64],
+    /// How much the server could vouch for the transaction.
+    pub verification: Verification,
+    /// Placeholders remain, to be completed by a later frame.
+    pub still_partial: bool,
+    /// Some of these keys come from a lookup table extension not yet confirmed.
+    pub tentative: bool,
+    positions: &'a [u8],
+    keys: &'a [u8],
+}
+
+impl<'a> LookupsComplete<'a> {
+    /// Bytes before the positions.
+    pub const HEADER_LEN: usize = 96;
+
+    /// Reads the frame, borrowing the positions and keys.
+    pub fn read(bytes: &'a [u8]) -> Result<Self> {
+        require(bytes, Self::HEADER_LEN, "lookups complete")?;
+        let count = usize::from(u16_at(bytes, 90));
+        let keys_at = Self::HEADER_LEN + count.next_multiple_of(8);
+        require(bytes, keys_at + count * 32, "lookups complete")?;
+        Ok(Self {
+            slot: u64_at(bytes, 0),
+            rx_ts_ns: u64_at(bytes, 8),
+            entry_index: u32_at(bytes, 16),
+            tx_index: u32_at(bytes, 20),
+            signature: bytes[24..88].try_into().expect("bounds checked"),
+            verification: Verification::from_byte(bytes[88]),
+            still_partial: bytes[89] & 1 != 0,
+            tentative: bytes[89] & 2 != 0,
+            positions: &bytes[Self::HEADER_LEN..Self::HEADER_LEN + count],
+            keys: &bytes[keys_at..keys_at + count * 32],
+        })
+    }
+
+    /// Each completed account: its index in the transaction's account keys, and its key.
+    pub fn completed(&self) -> impl ExactSizeIterator<Item = (usize, &'a [u8; 32])> {
+        let keys = self.keys;
+        self.positions.iter().enumerate().map(move |(n, position)| {
+            (
+                usize::from(*position),
+                keys[n * 32..n * 32 + 32].try_into().expect("bounds checked"),
+            )
+        })
+    }
+}

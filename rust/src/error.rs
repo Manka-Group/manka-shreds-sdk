@@ -65,6 +65,7 @@ pub enum Error {
     /// The server negotiated a codec this client never offered, or none at all.
     ///
     /// This client offers only zstd, so an uncompressed stream means the server has zstd disabled.
+    /// A Manka node never does: it requires compression and refuses an uncompressed handshake.
     /// Continuing would silently cost the operator several times the bandwidth they configured for.
     #[error("server negotiated {0:?}, but this client requires zstd")]
     CompressionRequired(crate::protocol::Codec),

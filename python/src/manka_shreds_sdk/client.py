@@ -25,11 +25,13 @@ from .events import (
     Duplicate,
     Entry,
     RawShred,
+    LookupsComplete,
     SlotEnd,
     SlotStart,
     read_duplicate,
     read_entry,
     read_raw_shred,
+    read_lookups_complete,
     read_slot_end,
     read_slot_start,
 )
@@ -74,6 +76,7 @@ __all__ = [
     "PingEvent",
     "PongEvent",
     "RawShredEvent",
+    "LookupsCompleteEvent",
     "SlotEndEvent",
     "SlotStartEvent",
     "TransactionEvent",
@@ -146,6 +149,16 @@ class RawShredEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class LookupsCompleteEvent:
+    """Accounts of a transaction received ``lookups_partial``, resolved since. Only on a connection
+    that passed ``unpack_lookups=True``."""
+
+    seq: int
+    complete: LookupsComplete
+    type: str = "lookups-complete"
+
+
+@dataclass(frozen=True, slots=True)
 class LagEvent:
     seq: int
     lag: Lag
@@ -191,6 +204,7 @@ Event = Union[
     SlotEndEvent,
     DuplicateEvent,
     RawShredEvent,
+    LookupsCompleteEvent,
     LagEvent,
     FilterAckEvent,
     PingEvent,
@@ -213,6 +227,10 @@ class Client:
         async for event in client:
             if event.type == "transaction":
                 print(event.transaction.slot, event.transaction.signature.hex())
+
+    Compression is not optional. This client offers only zstd and refuses a stream the node would
+    send uncompressed; every Manka node refuses to send one anyway. The compression level is the
+    node's choice and changes nothing here: a decoder reads any level, and the dictionary is the same.
     """
 
     __slots__ = (
@@ -266,11 +284,21 @@ class Client:
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
         max_message_bytes: int = MAX_FRAME_PAYLOAD,
         filters: list[NamedFilter] | None = None,
+        unpack_lookups: bool = False,
     ) -> Client:
         """Open a subscription.
 
         ``host`` and ``port`` are the node's address — public, and the only thing besides your
         secret that you need. There is no certificate to pin and no dictionary to install.
+
+        ``unpack_lookups`` asks for every transaction with the accounts its address lookup tables
+        load appended to its account keys, writable first, in the order the runtime loads them, and
+        matched by filters like any other account. ``loaded_counts`` says how many were appended;
+        ``static_account_count`` is the message's own, which account roles derive from. A table the
+        server does not hold yet leaves :data:`UNRESOLVED` at its accounts and the transaction
+        ``lookups_partial``; a :class:`LookupsCompleteEvent` follows with the keys once it arrives,
+        and a transaction your filter matches only on those keys arrives then, ``is_late``. A node
+        that does not unpack ignores the request.
         """
         if not host or port == 0:
             raise ProtocolError(
@@ -306,7 +334,7 @@ class Client:
         self._closer = closer
 
         try:
-            await self._handshake(key, streams, held, cache, filters, connect_timeout)
+            await self._handshake(key, streams, held, cache, filters, connect_timeout, unpack_lookups)
         except BaseException:
             await self.close()
             raise
@@ -320,6 +348,7 @@ class Client:
         cache: DictionaryCache | None,
         filters: list[NamedFilter] | None,
         timeout: float,
+        unpack_lookups: bool = False,
     ) -> None:
         assert self._wire is not None
         wire = self._wire
@@ -331,7 +360,11 @@ class Client:
             codecs=CodecBit.ZSTD,
             key_ref=reference,
             client_nonce=client_nonce,
-            capabilities=Capability.ACCEPTS_DICTIONARY,
+            capabilities=(
+                Capability.ACCEPTS_DICTIONARY | Capability.UNPACKS_LOOKUPS
+                if unpack_lookups
+                else Capability.ACCEPTS_DICTIONARY
+            ),
             dictionary_id=dictionary_id(held) if held else 0,
             filter=(
                 write_set_filter(filters).decode() if filters else None
@@ -513,6 +546,8 @@ class Client:
                     return DuplicateEvent(seq=seq, duplicate=read_duplicate(body))
                 case FrameKind.RAW_SHRED:
                     return RawShredEvent(seq=seq, shred=read_raw_shred(body))
+                case FrameKind.LOOKUPS_COMPLETE:
+                    return LookupsCompleteEvent(seq=seq, complete=read_lookups_complete(body))
                 case FrameKind.LAG:
                     return LagEvent(seq=seq, lag=read_lag(body))
                 case FrameKind.FILTER_ACK:

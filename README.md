@@ -89,7 +89,8 @@ asyncio.run(main())
 ```
 
 All three connect over QUIC, all three require compression, and all three fetch the compression
-dictionary from the node while connecting. You are subscribed to everything by default, votes included — narrowing
+dictionary from the node while connecting. Every Manka node requires compression too, and refuses a
+client that offers none; the level it compresses at is its own choice and needs nothing from you. You are subscribed to everything by default, votes included — narrowing
 that is the first thing to read about in the documentation.
 
 ## Requirements
